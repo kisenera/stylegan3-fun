@@ -141,16 +141,16 @@ def parse_comma_separated_list(s):
 @click.option('--freezeM',      help='Freeze first layers of the Mapping Network Gm',           type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--freezeE',      help='Freeze the embedding layer for conditional models',       type=bool, default=False, show_default=True)
 # Misc hyperparameters.
-@click.option('--gamma',        help='R1 regularization weight', metavar='FLOAT',               type=click.FloatRange(min=0), default=None)
+@click.option('--gamma',        help='R1 regularization weight', metavar='FLOAT',               type=click.FloatRange(min=0), default=1)
 @click.option('--p',            help='Probability for --aug=fixed', metavar='FLOAT',            type=click.FloatRange(min=0, max=1), default=0.2, show_default=True)
 @click.option('--target',       help='Target value for --aug=ada', metavar='FLOAT',             type=click.FloatRange(min=0, max=1), default=0.6, show_default=True)
 @click.option('--batch-gpu',    help='Limit batch size per GPU', metavar='INT',                 type=click.IntRange(min=1))
 @click.option('--cbase',        help='Capacity multiplier', metavar='INT',                      type=click.IntRange(min=1), default=32768, show_default=True)
-@click.option('--cmax',         help='Max. feature maps', metavar='INT',                        type=click.IntRange(min=1), default=512, show_default=True)
+@click.option('--cmax',         help='Max. feature maps', metavar='INT',                        type=click.IntRange(min=1), default=1024, show_default=True)
 @click.option('--glr',          help='G learning rate  [default: varies]', metavar='FLOAT',     type=click.FloatRange(min=0))
 @click.option('--dlr',          help='D learning rate', metavar='FLOAT',                        type=click.FloatRange(min=0), default=0.002, show_default=True)
 @click.option('--map-depth',    help='Mapping network depth  [default: varies]', metavar='INT', type=click.IntRange(min=1))
-@click.option('--mbstd-group',  help='Minibatch std group size', metavar='INT',                 type=click.IntRange(min=1), default=4, show_default=True)
+@click.option('--mbstd-group',  help='Minibatch std group size', metavar='INT',                 type=click.IntRange(min=1), default=32, show_default=True)
 # Misc settings.
 @click.option('--outdir',       help='Where to save the results', metavar='DIR',                type=click.Path(file_okay=False), default=os.path.join(os.getcwd(), 'training-runs'))
 @click.option('--desc',         help='String to include in result dir name', metavar='STR',     type=str)
@@ -158,7 +158,7 @@ def parse_comma_separated_list(s):
 @click.option('--kimg',         help='Total training duration', metavar='KIMG',                 type=click.IntRange(min=1), default=25000, show_default=True)
 @click.option('--resume-kimg',  help='Number of kimg images to resume from', metavar='RKIMG',   type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--tick',         help='How often to print progress', metavar='KIMG',             type=click.IntRange(min=1), default=4, show_default=True)
-@click.option('--snap',         help='How often to save model snapshots', metavar='TICKS',      type=click.IntRange(min=1), default=50, show_default=True)
+@click.option('--snap',         help='How often to save model snapshots', metavar='TICKS',      type=click.IntRange(min=1), default=1, show_default=True)
 @click.option('--img-snap',     help='How often to save image snapshots', metavar='INT',        type=click.IntRange(min=1), default=50, show_default=True)
 @click.option('--snap-res',     help='Screen resolution to save image snapshot',                type=click.Choice(['1080p', '4k', '8k']), default='4k', show_default=True)
 @click.option('--seed',         help='Random seed', metavar='INT',                              type=click.IntRange(min=0), default=0, show_default=True)
@@ -192,7 +192,7 @@ def main(**kwargs):
     # Initialize config.
     opts = dnnlib.EasyDict(kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
-    c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=512, w_dim=512, mapping_kwargs=dnnlib.EasyDict())
+    c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=1024, w_dim=1024, mapping_kwargs=dnnlib.EasyDict())
     c.D_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Discriminator', block_kwargs=dnnlib.EasyDict(), mapping_kwargs=dnnlib.EasyDict(), epilogue_kwargs=dnnlib.EasyDict())
     c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)  # TODO: Use ComplexSGD: https://arxiv.org/abs/2102.08431
@@ -211,9 +211,13 @@ def main(**kwargs):
     c.num_gpus = opts.gpus
     c.batch_size = opts.batch
     c.batch_gpu = opts.batch_gpu or opts.batch // opts.gpus
-    c.G_kwargs.channel_base = c.D_kwargs.channel_base = opts.cbase
-    c.G_kwargs.channel_max = c.D_kwargs.channel_max = opts.cmax
-    c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
+    #c.G_kwargs.channel_base = c.D_kwargs.channel_base = opts.cbase
+    c.G_kwargs.channel_base = opts.cbase
+    c.D_kwargs.channel_base = 16384
+    #c.G_kwargs.channel_max = c.D_kwargs.channel_max = opts.cmax
+    c.G_kwargs.channel_max = opts.cmax
+    c.D_kwargs.channel_max = 512
+    c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 4) if opts.map_depth is None else opts.map_depth
     c.G_kwargs.mapping_kwargs.freeze_layers = opts.freezem
     c.G_kwargs.mapping_kwargs.freeze_embed = opts.freezee
     c.D_kwargs.block_kwargs.freeze_layers = opts.freezed
@@ -250,11 +254,11 @@ def main(**kwargs):
     c.ema_kimg = c.batch_size * 10 / 32
     if opts.cfg == 'stylegan2':
         c.G_kwargs.class_name = 'training.networks_stylegan2.Generator'
-        c.loss_kwargs.style_mixing_prob = 0.9 # Enable style mixing regularization.
-        c.loss_kwargs.pl_weight = 2 # Enable path length regularization.
+        #c.loss_kwargs.style_mixing_prob = 0.9 # Enable style mixing regularization.
+        #c.loss_kwargs.pl_weight = 2 # Enable path length regularization.
         c.G_reg_interval = 4 # Enable lazy regularization for G.
         c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
-        c.loss_kwargs.pl_no_weight_grad = True # Speed up path length regularization by skipping gradient computation wrt. conv2d weights.
+        #c.loss_kwargs.pl_no_weight_grad = True # Speed up path length regularization by skipping gradient computation wrt. conv2d weights.
     else:
         c.G_kwargs.class_name = 'training.networks_stylegan3.Generator'
         c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
